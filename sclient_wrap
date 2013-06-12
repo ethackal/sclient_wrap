@@ -1,0 +1,68 @@
+#!/bin/bash
+
+LPORT=$1
+RHOST=$2
+RPORT=$3
+
+FORE="/tmp/$$_forepipe"
+BACK="/tmp/$$_backpipe"
+
+
+cleanup(){
+  echo "[*] cleaning up"
+  kill $proxy_pid
+  wait $! 2>/dev/null
+
+  rm $FORE 2>/dev/null
+  rm $BACK 2>/dev/null
+
+  return 0
+}
+
+exit_trap(){
+  echo
+  echo "[*] received shutdown"
+
+  cleanup
+  exit $?
+}
+
+
+if [ $# -ne 3 ]
+then
+  echo "`basename $0`: usage: `basename $0` lport rhost rport"
+  exit 65
+fi
+
+trap exit_trap EXIT 
+
+echo
+echo "-=[ sclient_wrap ]=-"
+echo 
+echo "A simple hack to wrap arbitrary TCP traffic in SSL."
+echo "Requires nc and openssl s_client"
+echo
+echo "Use Control-C to exit."
+
+mkfifo $FORE 2>/dev/null
+mkfifo $BACK 2>/dev/null
+
+while ( true )
+do
+  echo
+  echo "[*] opening new SSL connection to $RHOST:$RPORT"
+  openssl s_client -connect $RHOST:$RPORT -quiet 1>$BACK <$FORE 2>/dev/null &
+  client_pid=$!
+
+  echo "[*] opening netcat proxy on port $LPORT"
+  nc -l $LPORT 0<$BACK 1>$FORE &
+  proxy_pid=$!
+
+  echo "[*] proxy is ready for connection"
+
+  wait $proxy_pid 2>/dev/null
+
+  echo "[*] proxy exited, restarting ssl client"
+  kill $client_pid
+  wait $! 2>/dev/null
+done
